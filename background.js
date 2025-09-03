@@ -13,10 +13,7 @@ chrome.storage.session.get(['accessToken'], (result) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  console.log("🔵 Background received message:", msg.action, "from:", sender.tab?.url || sender.url);
-  
   if (msg.action === "get_api_key") {
-    console.log("✅ Sending API key response", { apiKey: apiKey ? "EXISTS" : "MISSING", redirectUri });
     sendResponse({ apiKey, redirectUri });
   }
 
@@ -25,9 +22,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.storage.session.get(['accessToken'], (result) => {
       if (result.accessToken && !accessToken) {
         accessToken = result.accessToken;
-        console.log("� Restored access token from session storage for status check");
       }
-      console.log("�🔍 Checking login status, accessToken exists:", !!accessToken);
       sendResponse({ isLoggedIn: !!accessToken });
     });
     return true; // Required for async response
@@ -35,24 +30,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === "received_token") {
     const requestToken = msg.request_token;
-    console.log("🟡 Starting token exchange with:", requestToken);
-    console.log("🔧 Sender info:", {
-      tabId: sender.tab?.id,
-      url: sender.tab?.url,
-      frameId: sender.frameId
-    });
-
     const checksum = CryptoJS.SHA256(apiKey + requestToken + apiSecret).toString();
-    console.log("🔐 Generated checksum:", checksum);
-    console.log("🔑 Using API Key:", apiKey);
     
     const requestBody = new URLSearchParams({
       api_key: apiKey,
       request_token: requestToken,
       checksum: checksum
     });
-    
-    console.log("📤 Request body:", requestBody.toString());
 
     fetch("https://api.kite.trade/session/token", {
       method: "POST",
@@ -62,19 +46,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       },
       body: requestBody
     })
-      .then(res => {
-        console.log("🌐 Kite API response status:", res.status);
-        return res.json();
-      })
+      .then(res => res.json())
       .then(data => {
-        console.log("📦 Kite API response data:", data);
         if (data.status === "success") {
           accessToken = data.data.access_token;
           // Store in session storage to persist across service worker restarts
-          chrome.storage.session.set({ accessToken }, () => {
-            console.log("✅ Access token saved to session storage");
-          });
-          console.log("✅ Access token saved successfully");
+          chrome.storage.session.set({ accessToken });
 
           // Notify kite.zerodha.com tab about success
           chrome.tabs.query({ url: "*://kite.zerodha.com/*" }, (tabs) => {
@@ -82,7 +59,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               chrome.tabs.sendMessage(tab.id, { action: "login_success" }, (response) => {
                 if (chrome.runtime.lastError) {
                   // Ignore connection errors - tab might be closed or navigated away
-                  console.log("Tab connection error (ignored):", chrome.runtime.lastError.message);
                 }
               });
             }
@@ -94,10 +70,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })
       .catch(err => {
         console.error("💥 Error exchanging token:", err);
-        console.error("💥 Error details:", {
-          message: err.message,
-          stack: err.stack
-        });
       });
 
     console.log("🔄 Token exchange initiated, returning false");
@@ -106,23 +78,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === "cancel_orders") {
-    console.log("🔴 Cancel orders requested. Current accessToken:", accessToken ? "EXISTS" : "NULL");
-    
     // Check session storage first in case service worker restarted
     chrome.storage.session.get(['accessToken'], (result) => {
       if (result.accessToken && !accessToken) {
         accessToken = result.accessToken;
-        console.log("🔄 Restored access token from session storage for cancel operation");
       }
       
       if (!accessToken) {
-        console.log("❌ No access token - returning error");
         sendResponse({ status: "error", message: "Not logged in" });
         return;
       }
-      
-      console.log("✅ Access token found - proceeding with cancel");
-      console.log("🔄 Fetching orders from Kite API...");
       fetch("https://api.kite.trade/orders", {
         method: "GET",
         headers: {
@@ -130,28 +95,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           "X-Kite-Version": "3"
         }
       })
-        .then(res => {
-          console.log("📡 GET orders response status:", res.status);
-          return res.json();
-        })
+        .then(res => res.json())
         .then(data => {
-          console.log("📦 GET orders response data:", data);
           if (data.status !== "success") {
-            console.log("❌ GET orders failed:", data);
             sendResponse({ status: "error", details: data });
             return;
           }
-          const openOrders = data.data.filter(o => o.status === "OPEN" || o.status === "TRIGGER PENDING");
-          console.log("🎯 Found open orders:", openOrders.length);
+          const openOrders = data.data.filter(o => 
+            o.status === "OPEN" || 
+            o.status === "TRIGGER PENDING"
+          );
           if (openOrders.length === 0) {
-            console.log("✅ No open orders to cancel");
             sendResponse({ status: "ok", cancelled_count: 0, details: [] });
             return;
           }
-          console.log("🔄 Starting cancel operations for", openOrders.length, "orders");
           Promise.all(
             openOrders.map(order => {
-              console.log("🗑️ Cancelling order:", order.order_id, "variety:", order.variety);
               return fetch(`https://api.kite.trade/orders/${order.variety}/${order.order_id}`, {
                 method: "DELETE",
                 headers: {
@@ -159,9 +118,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   "X-Kite-Version": "3"
                 }
               }).then(res => {
-                console.log("📡 DELETE order", order.order_id, "response status:", res.status);
                 return res.json().then(body => {
-                  console.log("📦 DELETE order", order.order_id, "response body:", body);
                   return {
                     ok: res.ok,
                     order_id: order.order_id,
@@ -175,16 +132,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             })
           ).then(results => {
             const cancelledCount = results.filter(r => r.ok).length;
-            console.log("✅ Cancel operation complete. Cancelled:", cancelledCount, "Total:", results.length);
-            console.log("📊 Results details:", results);
             sendResponse({ status: "ok", cancelled_count: cancelledCount, details: results });
           }).catch(promiseErr => {
-            console.log("❌ Promise.all error:", promiseErr);
             sendResponse({ status: "error", error: promiseErr.toString() });
           });
         })
         .catch(err => {
-          console.log("❌ GET orders fetch error:", err);
           sendResponse({ status: "error", error: err.toString() });
         });
     });
@@ -193,24 +146,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === "adjust_prices") {
     const adjustment = msg.adjustment; // +1 or -1
-    console.log(`🔧 Price adjustment requested: ${adjustment > 0 ? '+' : ''}${adjustment}`);
-    console.log("🔴 Current accessToken:", accessToken ? "EXISTS" : "NULL");
     
     // Check session storage first in case service worker restarted
     chrome.storage.session.get(['accessToken'], (result) => {
       if (result.accessToken && !accessToken) {
         accessToken = result.accessToken;
-        console.log("🔄 Restored access token from session storage for price adjustment");
       }
       
       if (!accessToken) {
-        console.log("❌ No access token - returning error");
         sendResponse({ status: "error", message: "Not logged in" });
         return;
       }
-      
-      console.log("✅ Access token found - proceeding with price adjustment");
-      console.log("🔄 Fetching orders from Kite API...");
       fetch("https://api.kite.trade/orders", {
         method: "GET",
         headers: {
@@ -218,14 +164,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           "X-Kite-Version": "3"
         }
       })
-        .then(res => {
-          console.log("📡 GET orders response status:", res.status);
-          return res.json();
-        })
+        .then(res => res.json())
         .then(data => {
-          console.log("📦 GET orders response data:", data);
           if (data.status !== "success") {
-            console.log("❌ GET orders failed:", data);
             sendResponse({ status: "error", details: data });
             return;
           }
@@ -237,19 +178,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             o.price > 0
           );
           
-          console.log("🎯 Found modifiable orders:", modifiableOrders.length);
           if (modifiableOrders.length === 0) {
-            console.log("✅ No modifiable orders found");
             sendResponse({ status: "ok", updated_count: 0, details: [] });
             return;
           }
-          
-          console.log("🔄 Starting price modification for", modifiableOrders.length, "orders");
           Promise.all(
             modifiableOrders.map(order => {
               const newPrice = parseFloat(order.price) + adjustment;
               if (newPrice <= 0) {
-                console.log("⚠️ Skipping order", order.order_id, "- would result in non-positive price:", newPrice);
                 return Promise.resolve({
                   ok: false,
                   order_id: order.order_id,
@@ -259,8 +195,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                   body: JSON.stringify({ error: "Price would be <= 0" })
                 });
               }
-              
-              console.log("📝 Modifying order:", order.order_id, "from ₹" + order.price, "to ₹" + newPrice.toFixed(2));
               
               const requestBody = new URLSearchParams({
                 quantity: order.quantity,
@@ -280,9 +214,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 },
                 body: requestBody
               }).then(res => {
-                console.log("📡 PUT order", order.order_id, "response status:", res.status);
                 return res.json().then(body => {
-                  console.log("📦 PUT order", order.order_id, "response body:", body);
                   return {
                     ok: res.ok,
                     order_id: order.order_id,
@@ -298,16 +230,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             })
           ).then(results => {
             const updatedCount = results.filter(r => r.ok).length;
-            console.log("✅ Price adjustment complete. Updated:", updatedCount, "Total:", results.length);
-            console.log("📊 Results details:", results);
             sendResponse({ status: "ok", updated_count: updatedCount, details: results });
           }).catch(promiseErr => {
-            console.log("❌ Promise.all error:", promiseErr);
             sendResponse({ status: "error", error: promiseErr.toString() });
           });
         })
         .catch(err => {
-          console.log("❌ GET orders fetch error:", err);
           sendResponse({ status: "error", error: err.toString() });
         });
     });
@@ -315,17 +243,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === "get_orders") {
-    console.log("📋 Get orders requested");
-    
     // Check session storage first in case service worker restarted
     chrome.storage.session.get(['accessToken'], (result) => {
       if (result.accessToken && !accessToken) {
         accessToken = result.accessToken;
-        console.log("🔄 Restored access token from session storage for get orders");
       }
       
       if (!accessToken) {
-        console.log("❌ No access token for get orders");
         sendResponse({ status: "error", message: "Not logged in" });
         return;
       }
@@ -343,16 +267,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ status: "error", details: data });
             return;
           }
-          const openOrders = data.data.filter(o => o.status === "OPEN" || o.status === "TRIGGER PENDING");
+          const openOrders = data.data.filter(o => 
+            o.status === "OPEN" || 
+            o.status === "TRIGGER PENDING"
+          );
           sendResponse({ status: "ok", orders: openOrders });
         })
         .catch(err => {
-          console.log("❌ GET orders fetch error:", err);
           sendResponse({ status: "error", error: err.toString() });
         });
     });
     return true;
   }
-  
-  console.log("⚪ Message handler complete for action:", msg.action);
 });
