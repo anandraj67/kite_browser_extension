@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Kite In-Page Controller",
+  "version": "1.0",
+  "description": "Injects a top bar into kite.zerodha.com for login and cancel orders.",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://api.kite.trade/*",
+    "https://kite.trade/*",
+    "https://kite.zerodha.com/*",
+    "https://anandraj67.github.io/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://kite.zerodha.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://anandraj67.github.io/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["config.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
