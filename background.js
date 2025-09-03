@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log("🔵 Background received message:", msg.action, "from:", sender.tab?.url || sender.url);
   
   if (msg.action === "get_api_key") {
-    console.log("✅ Sending API key response");
+    console.log("✅ Sending API key response", { apiKey: apiKey ? "EXISTS" : "MISSING", redirectUri });
     sendResponse({ apiKey, redirectUri });
   }
 
@@ -305,6 +305,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             console.log("❌ Promise.all error:", promiseErr);
             sendResponse({ status: "error", error: promiseErr.toString() });
           });
+        })
+        .catch(err => {
+          console.log("❌ GET orders fetch error:", err);
+          sendResponse({ status: "error", error: err.toString() });
+        });
+    });
+    return true;
+  }
+
+  if (msg.action === "get_orders") {
+    console.log("📋 Get orders requested");
+    
+    // Check session storage first in case service worker restarted
+    chrome.storage.session.get(['accessToken'], (result) => {
+      if (result.accessToken && !accessToken) {
+        accessToken = result.accessToken;
+        console.log("🔄 Restored access token from session storage for get orders");
+      }
+      
+      if (!accessToken) {
+        console.log("❌ No access token for get orders");
+        sendResponse({ status: "error", message: "Not logged in" });
+        return;
+      }
+      
+      fetch("https://api.kite.trade/orders", {
+        method: "GET",
+        headers: {
+          Authorization: `token ${apiKey}:${accessToken}`,
+          "X-Kite-Version": "3"
+        }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.status !== "success") {
+            sendResponse({ status: "error", details: data });
+            return;
+          }
+          const openOrders = data.data.filter(o => o.status === "OPEN" || o.status === "TRIGGER PENDING");
+          sendResponse({ status: "ok", orders: openOrders });
         })
         .catch(err => {
           console.log("❌ GET orders fetch error:", err);
